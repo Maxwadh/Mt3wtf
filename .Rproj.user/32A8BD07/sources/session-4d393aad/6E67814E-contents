@@ -1,0 +1,1370 @@
+require(mixtools)
+require(Hmisc)
+require(mapdata)
+require(maps)
+library(dplyr)
+library(MASS)
+library(ggplot2)
+library(essentials)
+library(tidyverse)
+library(sf)
+library(here)
+library(spData)
+library(gridExtra)
+library(magrittr)
+library(dplyr)
+library(car)
+library(lubridate)
+library(ggpattern)
+library(VCA)
+library(fastDummies)
+library(ppcor)
+
+manx = read.csv("C:/Users/maxsh/OneDrive/Documents/Notes Biology/Copeland Manxies/GPSforMax.csv", stringsAsFactors = TRUE)
+head(manx)
+
+manx$POSIXct = as.POSIXct((manx$Timestamp), format = "%Y-%m-%d %H:%M:%S", tz = "GMT")
+
+#manxEA00056 = manx[manx$Ring == "EA00056"] #fails
+manxEA00056 = filter(manx, Ring == "EA00056")
+
+ggplot(aes(x=Longitude,y=Latitude), data = manxEA00056) + geom_point(size=0.1)+ theme_classic()
+
+plot(manxEA00056$Longitude, manxEA00056$Latitude, pch = 16, cex = 0.3, asp = 1.5)
+lines(manxEA00056$Longitude, manxEA00056$Latitude, lwd = 0.3)       
+
+map("worldHires", xlim=c(min(manxEA00056$Longitude)-2.5, max(manxEA00056$Longitude)+2.5), 
+    ylim=c(min(manxEA00056$Latitude)-2.5, max(manxEA00056$Latitude)+2.5), col="#aaeeaa", fill=TRUE, bg = "#aaeeff")
+points(manxEA00056$Longitude, manxEA00056$Latitude, pch = 16, cex = 0.3, lwd = 0.3, col = "#b05050")      
+
+# COPYPASTED DISTANCE FUNCTION #########################################
+
+# this function finds the distance between two coordinates on a sphere
+gcd.hf <- function(long1, lat1, long2, lat2) { 
+  R <- 6371 # Earth mean radius [km]
+  deg2rad <- function(deg) return(deg*pi/180)
+  long1 <- deg2rad(long1)
+  long2 <- deg2rad(long2)
+  lat1 <- deg2rad(lat1)
+  lat2 <- deg2rad(lat2)
+  delta.long <- (long2 - long1)
+  delta.lat <- (lat2 - lat1)
+  a <- sin(delta.lat/2)^2 + cos(lat1) * cos(lat2) * sin(delta.long/2)^2
+  c <- 2 * asin(min(1,sqrt(a)))
+  
+  coo2 <- function(x){2 * asin(min(1,sqrt(x)))}
+  c <- lapply(a, coo2)
+  c <- do.call("c", c)
+  d = R * c
+  return(d) # Distance in km
+}
+
+# convert degrees to radians
+deg2rad <- function(x){
+  return(x*((2*pi)/360))
+}
+
+# convert radians to degrees
+rad2deg <- function(x){
+  return((x/(2*pi))*360)
+}
+
+# TIMEDIFFS from copeland ###########################
+
+# find the time ellapsed between each GPS fix (in seconds)
+n = nrow(manxEA00056)
+timediffs = difftime(manxEA00056$POSIXct[2:n], manxEA00056$POSIXct[1:(n-1)], units = "secs")
+# and distances (kikometres)
+displacements = gcd.hf(manxEA00056$Longitude[2:n], manxEA00056$Latitude[2:n], manxEA00056$Longitude[1:(n-1)], manxEA00056$Latitude[1:(n-1)])
+# convert to metres
+displacements = displacements*1000
+speed = displacements/as.numeric(timediffs)
+hist(speed)
+# change 0s to a negligible number
+speed[speed == 0] <- 0.0001
+
+# run a Gaussian mixture model forced to find 2 components
+mixout = normalmixEM(speed, k = 3)
+mixout = normalmixEM(speed, k = 2)
+
+
+# let's look at the Gaussians fittted to the speed data
+plot(mixout, which = 2, breaks = 1000)
+plot.new()
+plot.window(xlim=c(0,3), ylim=c(0,1.5))
+plot.window(xlim=c(0,15), ylim=c(0,0.1))
+plot(mixout, which = 2, breaks = 1000, add = TRUE)
+
+manxEA00056forage = manxEA00056[-n,][mixout$posterior[,1] > 0.5,]
+manxEA00056travel = manxEA00056[-n,][mixout$posterior[,1] < 0.5,]
+points(manxEA00056forage$Longitude, manxEA00056forage$Latitude, cex = 2, pch = 0)
+
+####################### FUCKIN AROUND ################################
+#######################     TIME      ################################
+
+map("worldHires", xlim=c(min(manxEA00056$Longitude)-2.5, max(manxEA00056$Longitude) +2.5 ), 
+    ylim=c(min(manxEA00056$Latitude)-2,max(manxEA00056$Latitude)+2), col="#aaeeaa", fill=TRUE, bg = "#aaeeff")  
+
+plot.new()
+library(tidyverse)
+
+worldmapping = map_data("world")
+#ukmapping = filter(worldmapping, long > -30 & long < 5 & lat > 45 & lat < 65)
+ggplot(manx, aes(x=Longitude, y = Latitude)) + 
+  geom_map(data = worldmapping, map = worldmapping, aes(x = long, y = lat, map_id = region)) + 
+  coord_sf(xlim = c(-25,5), ylim = c(45,65))
+
+library(sf)
+
+head(worldmapping)
+
+# trying to add extra points so the density plot doesn't cut off
+manxEA00056foragecorner1 = data.frame("2019-07-26 01:03:54", min(manxEA00056forage$Latitude)-2, min(manxEA00056forage$Longitude)-2, "EA00056", "cp", 2019, "Chick-Rearing", "2019-07-26 01:03:54")
+manxEA00056foragecorner2 = data.frame("2019-07-26 01:03:54", max(manxEA00056forage$Latitude)+2, max(manxEA00056forage$Longitude)+2, "EA00056", "cp", 2019, "Chick-Rearing", "2019-07-26 01:03:54")
+head(manxEA00056forage)
+names(manxEA00056foragecorner1) = c("Timestamp", "Latitude", "Longitude", "Ring", "Colony", "Year",  "Campaign", "POSIXct")
+names(manxEA00056foragecorner2) = c("Timestamp", "Latitude", "Longitude", "Ring", "Colony", "Year",  "Campaign", "POSIXct")
+manxEA00056forageO = rbind(manxEA00056forage, manxEA00056foragecorner1, manxEA00056foragecorner2)
+
+ggplot(manxEA00056forageO,aes(x=Longitude,y=Latitude)) + 
+  geom_point(colour = "#f05050", alpha = 0.0) + 
+  geom_path(data = manxEA00056forage, colour = "#f05050", alpha = 0.5) + 
+  stat_density2d(aes(alpha=..level..), geom = "polygon") +
+  scale_alpha_continuous(limits=c(0,0.5), breaks = seq(0,0.5, by = 0.025)) + 
+  #coord_sf(xlim = c(-25,5), ylim = c(45,65)) 
+  coord_sf(xlim = c(-20,0), ylim = c(50,60)) 
+  #coord_sf(xlim = c(-18,-13), ylim = c(55,57))
+
+head(worldmapping)
+worldmapping
+head(ukmapped)
+
+ukmapped = filter(worldmapping, region == "UK")
+unique(worldmapping$region)
+ukmapped = filter(worldmapping, region == "UK" | region == "France" | region == "Ireland" | region == "Iceland"))
+
+######### attempt 2
+
+library(sf)
+library(here)
+library(spData)
+
+worldmappingsf <- sf::st_as_sf(maps::map("world", plot = FALSE, fill = TRUE))
+
+#### ACTUALLY WORKS ####
+
+ggplot(worldmappingsf) +
+  geom_sf(col = "#88cc88", fill = "#aaeeaa") + 
+  geom_path(data = manxEA00056forage, aes(x=Longitude,y=Latitude), col = "#eeee55", linewidth = 1) + 
+  stat_density2d(data = manxEA00056forageO, aes(x=Longitude,y=Latitude, alpha=..level..), geom = "polygon", fill = "#801010") +
+  scale_alpha_continuous(limits=c(0,0.5), breaks = seq(0,0.5, by = 0.025)) + 
+  coord_sf(xlim = c(-20,0), ylim = c(50,60)) + 
+  theme_classic() + theme(panel.background = element_rect(fill = '#cceeff'))
+
+#########################
+
+?stat_density2d
+
+##recoloured
+ggplot(worldmappingsf) +
+  geom_sf(col = "#aab5aa", fill = "#ccd5cc") + 
+  geom_path(data = manxEA00056forage, aes(x=Longitude,y=Latitude), col = "grey20", linewidth = 0.5) + 
+  stat_density2d(data = manxEA00056forageO, aes(x=Longitude,y=Latitude, alpha =..level..), geom = "polygon", fill = "#881144", show.legend = FALSE) +
+  scale_alpha_continuous(limits=c(0,1), breaks = seq(0,1, by = 0.025)) + 
+  coord_sf(xlim = c(-20,0), ylim = c(50,60)) +
+  theme_classic() + theme(panel.background = element_rect(fill = '#eef5f5'))
+  
+#colour test
+ggplot(worldmappingsf) +
+  geom_sf(col = "#aab5aa", fill = "#ccd5cc") + 
+  geom_path(data = manxEA00056forage, aes(x=Longitude,y=Latitude), col = "grey20", linewidth = 0.5) + 
+  stat_density2d_filled(data = manxEA00056forageO, aes(x=Longitude,y=Latitude, alpha =after_stat(level)), geom = "polygon", show.legend = FALSE, bins = 9) +
+  #scale_alpha_continuous(limits=c(0,1), breaks = seq(0,1, by = 0.025)) + 
+  scale_fill_brewer(palette=3,direction=1) + 
+  coord_sf(xlim = c(-20,0), ylim = c(50,60)) + 
+  theme_classic() + theme(panel.background = element_rect(fill = '#eef5f5'))
+
+#### REPEAT FOR ALL MANXIES FROM EACH GROUP
+
+manxREAR = filter(manx, Campaign == "Chick-Rearing")
+manxINC = filter(manx, Campaign == "Incubation")
+manxcp = filter(manx, Colony == "cp")
+manxsk = filter(manx, Colony == "sk")
+manxREARcp = filter(manx, Campaign == "Chick-Rearing" & Colony == "cp")
+manxINCcp = filter(manx, Campaign == "Incubation" & Colony == "cp")
+manxREARsk = filter(manx, Campaign == "Chick-Rearing" & Colony == "sk")
+manxINCsk = filter(manx, Campaign == "Incubation" & Colony == "sk")
+head(manxREAR)
+head(manxINC)
+
+unique(manx$Ring) # 339
+unique(manxINC$Ring) # 187
+unique(manxREAR$Ring) # 180
+unique(manxsk$Ring) # 153
+unique(manxcp$Ring) # 187
+#number differences because sometimes same bird was tracked in different years
+
+ggplot(worldmappingsf) + 
+  geom_sf(col="#aab5aa",fill="#ccd5cc") +
+  stat_density2d(data = manxREARcp, aes(x=Longitude,y=Latitude)) + 
+  #coord_sf(xlim=c(-20,0),ylim=c(50,60))
+  coord_sf(xlim=c(-8,-3),ylim=c(51,57))
+
+ggplot(worldmappingsf) + 
+  geom_sf(col="#aab5aa",fill="#ccd5cc") +
+  stat_density2d(data = manxINCcp, aes(x=Longitude,y=Latitude)) + 
+  #coord_sf(xlim=c(-20,0),ylim=c(50,60))
+  coord_sf(xlim=c(-8,-3),ylim=c(51,57))
+
+##### SPEED MIXOUT INC
+
+# find the time ellapsed between each GPS fix (in seconds)
+n = nrow(manxINC)
+timediffs = difftime(manxINC$POSIXct[2:n], manxINC$POSIXct[1:(n-1)], units = "secs")
+# and distances (kikometres)
+displacements = gcd.hf(manxINC$Longitude[2:n], manxINC$Latitude[2:n], manxINC$Longitude[1:(n-1)], manxINC$Latitude[1:(n-1)])
+# convert to metres
+displacements = displacements*1000
+speedINC = displacements/as.numeric(timediffs)
+speedINC[speedINC == 0 | speedINC < 0] <- 0.0001
+hist(speedINC, breaks = 1000)
+# change 0s to a negligible number
+
+# run a Gaussian mixture model forced to find 2 components
+# mixout = normalmixEM(speedINC, k = 3)
+mixoutINC = normalmixEM(na.omit(speedINC), k = 2)
+
+summary(speed)
+summary(speedINC)
+
+# let's look at the Gaussians fittted to the speed data
+plot(mixoutINC, which = 2, breaks = 1000)
+
+manxINCforage = manxINC[-n,][mixoutINC$posterior[,1] > 0.5,]
+manxINCtravel = manxINC[-n,][mixoutINC$posterior[,1] < 0.5,]
+
+ggplot(worldmappingsf) + 
+  geom_sf(col="#aab5aa",fill="#ccd5cc") +
+  stat_density2d(data = manxINCforage, aes(x=Longitude,y=Latitude), col = "blue") + 
+  stat_density2d(data = manxINC, aes(x=Longitude,y=Latitude), col = "red") +
+  coord_sf(xlim=c(-20,0),ylim=c(50,60)) +
+  #coord_sf(xlim=c(-8,-3),ylim=c(51,57)) + 
+  #coord_sf(xlim=c(-6,-5),ylim=c(54.3,55)) + 
+  geom_point(data=manxINCforage, aes(x=Longitude,y=Latitude), col = "black", size = 0.05)
+
+ggplot(manxINC, aes(x=Longitude,y=Latitude)) + geom_point(size=0.2) + 
+  geom_point(data = manxINCforage, col = "red")
+
+ggplot(manxEA00056, aes(Longitude,Latitude)) + geom_point()
+dev.off()
+
+############ ALL 4
+
+n = nrow(manxINCcp)
+timediffs = difftime(manxINCcp$POSIXct[2:n], manxINCcp$POSIXct[1:(n-1)], units = "secs")
+displacements = gcd.hf(manxINCcp$Longitude[2:n], manxINCcp$Latitude[2:n], manxINCcp$Longitude[1:(n-1)], manxINCcp$Latitude[1:(n-1)])
+displacements = displacements*1000
+speedINCcp = displacements/as.numeric(timediffs)
+speedINCcp[speedINCcp == 0 | speedINCcp < 0] <- 0.0001
+hist(speedINCcp, breaks = 1000)
+
+mixoutINCcp = normalmixEM(na.omit(speedINCcp), k = 2)
+manxINCcpforage = manxINCcp[-n,][mixoutINCcp$posterior[,1] > 0.5,]
+
+n = nrow(manxINCsk)
+timediffs = difftime(manxINCsk$POSIXct[2:n], manxINCsk$POSIXct[1:(n-1)], units = "secs")
+displacements = gcd.hf(manxINCsk$Longitude[2:n], manxINCsk$Latitude[2:n], manxINCsk$Longitude[1:(n-1)], manxINCsk$Latitude[1:(n-1)])
+displacements = displacements*1000
+speedINCsk = displacements/as.numeric(timediffs)
+speedINCsk[speedINCcp == 0 | speedINCsk < 0] <- 0.0001
+hist(speedINCsk, breaks = 1000)
+
+mixoutINCsk = normalmixEM(na.omit(speedINCsk), k = 2)
+manxINCskforage = manxINCsk[-n,][mixoutINCsk$posterior[,1] > 0.5,]
+
+n = nrow(manxREARcp)
+timediffs = difftime(manxREARcp$POSIXct[2:n], manxREARcp$POSIXct[1:(n-1)], units = "secs")
+displacements = gcd.hf(manxREARcp$Longitude[2:n], manxREARcp$Latitude[2:n], manxREARcp$Longitude[1:(n-1)], manxREARcp$Latitude[1:(n-1)])
+displacements = displacements*1000
+speedREARcp = displacements/as.numeric(timediffs)
+speedREARcp[speedREARcp == 0 | speedREARcp < 0] <- 0.0001
+hist(speedREARcp, breaks = 1000)
+
+mixoutREARcp = normalmixEM(na.omit(speedREARcp), k = 2)
+manxREARcpforage = manxREARcp[-n,][mixoutREARcp$posterior[,1] > 0.5,]
+
+n = nrow(manxREARsk)
+timediffs = difftime(manxREARsk$POSIXct[2:n], manxREARsk$POSIXct[1:(n-1)], units = "secs")
+displacements = gcd.hf(manxREARsk$Longitude[2:n], manxREARsk$Latitude[2:n], manxREARsk$Longitude[1:(n-1)], manxREARsk$Latitude[1:(n-1)])
+displacements = displacements*1000
+speedREARsk = displacements/as.numeric(timediffs)
+speedREARsk[speedREARsk == 0 | speedREARsk < 0] <- 0.0001
+hist(speedREARsk, breaks = 1000)
+
+mixoutREARsk = normalmixEM(na.omit(speedREARsk), k = 2)
+manxREARskforage = manxREARsk[-n,][mixoutREARsk$posterior[,1] > 0.5,]
+
+n = nrow(manx)
+timediffs = difftime(manx$POSIXct[2:n], manx$POSIXct[1:(n-1)], units = "secs")
+displacements = gcd.hf(manx$Longitude[2:n], manx$Latitude[2:n], manx$Longitude[1:(n-1)], manx$Latitude[1:(n-1)])
+displacements = displacements*1000
+speed = displacements/as.numeric(timediffs)
+speed[speed == 0 | speed < 0] <- 0.0001
+hist(speed, breaks = 1000)
+
+mixout = normalmixEM(na.omit(speed), k = 2)
+manxforage = manx[-n,][mixout$posterior[,1] > 0.5,]
+manxtravel = manx[-n,][mixout$posterior[,1] < 0.5,]
+plot(mixout, which = 2, breaks = 1000)
+
+summary(speed)
+head(speed)
+speed
+
+mixout
+head(mixout)
+
+test
+
+####################### plotting #########################################
+
+ggplot(worldmappingsf) + 
+  geom_sf(col="#b5bac5",fill="#d5e0e5", linewidth=0.565) +
+  stat_density2d(data = manxINCcpforage, aes(x=Longitude,y=Latitude, alpha=..level..), geom = "polygon", fill = "#5599e5", show.legend = FALSE, bins = 20) + 
+  stat_density2d(data = manxINCskforage, aes(x=Longitude,y=Latitude, alpha=..level..), geom = "polygon", fill = "#f5be00", show.legend = FALSE, bins = 20) +
+  #stat_density2d(data = manxREARcpforage, aes(x=Longitude,y=Latitude, alpha=..level..), geom = "polygon", fill = "#224488", show.legend = FALSE, bins = 20) + 
+  #stat_density2d(data = manxREARskforage, aes(x=Longitude,y=Latitude, alpha=..level..), geom = "polygon", fill = "#ef3602", show.legend = FALSE, bins = 20) + 
+  scale_alpha_continuous(limits=c(0,0.5), breaks = seq(0,0.5, by = 0.025)) +
+  theme_classic() + theme(panel.background = element_rect(fill = '#eef8fc')) + 
+  annotate("point", x = CopelandLoc[2], y=CopelandLoc[1], colour = "black", shape = 16, size = 2.5) + 
+  annotate("text", x = CopelandLoc[2], y = CopelandLoc[1], label = "Copeland", colour = "#001155", hjust = 1.2, vjust=0.5, size = 5) + 
+  annotate("point", x = SkomerLoc[2], y=SkomerLoc[1], colour = "black", shape = 16, size = 2.5) +
+  annotate("text", x = SkomerLoc[2], y = SkomerLoc[1], label = "Skomer", colour = "#001155", hjust = -0.2, vjust=-0.1, size = 5) + 
+  theme(plot.background = element_rect(fill = "#2a5b89"), axis.text = element_text(size = 13, colour = "#A9C8DB"), 
+        axis.title = element_text(size=14, colour = "#eef8fc", face = "bold")) + theme(axis.ticks = element_line(colour = "#A9C8DB")) + 
+  
+  #scale_fill_continuous(limits=c(0,0.5), breaks = seq(0,0.5, by = 0.025), low = "blue", high = "red") +
+  #labs(col = "the legend") + scale_colour_manual(values = legend_col) + 
+  #coord_sf(xlim=c(-20,0),ylim=c(50,60)) 
+  coord_sf(xlim=c(-8,-3),ylim=c(51,56)) 
+  #coord_sf(xlim=c(-6,-5),ylim=c(54.3,55)) 
+  #geom_point(data=manxINCforage, aes(x=Longitude,y=Latitude), col = "black", size = 0.05)
+
+?annotate
+
+CopelandLoc[2]
+head(manx)
+library(gridExtra)
+
+grid.arrange(densINC,densREAR, nrow=1) #### MAIN PLOT FOR EACH STATUS
+
+####################legend efforts
+legend_col <- c("cp" = "#ffd000", "sk" = "#00ee00")
+
+ggplot(worldmappingsf) + 
+  geom_sf(col="#aab5aa",fill="#ccd5cc") +
+  #stat_density2d(data = manxINCcpforage, aes(x=Longitude,y=Latitude, alpha=..level..), geom = "polygon", fill = "#55aaff", show.legend = FALSE, bins = 20) + 
+  #stat_density2d(data = manxINCskforage, aes(x=Longitude,y=Latitude, alpha=..level..), geom = "polygon", fill = "#ff6666", show.legend = FALSE, bins = 20) +
+  stat_density2d(data = manxREARcpforage, aes(x=Longitude,y=Latitude, alpha=..level.., fill = "cp"), geom = "polygon", show.legend = FALSE, bins = 20) + 
+  stat_density2d(data = manxREARskforage, aes(x=Longitude,y=Latitude, alpha=..level.., fill = "sk"), geom = "polygon", show.legend = FALSE, bins = 20) + 
+  scale_alpha_continuous(limits=c(0,0.5), breaks = seq(0,0.5, by = 0.025)) +
+  theme_classic() + theme(panel.background = element_rect(fill = '#eef5f5')) + 
+  labs(color = "the legend") + scale_color_manual(values = legend_col) + 
+  #coord_sf(xlim=c(-20,0),ylim=c(50,60)) 
+  coord_sf(xlim=c(-8,-3),ylim=c(51,56)) 
+  #coord_sf(xlim=c(-6,-5),ylim=c(54.3,55)) 
+  #geom_point(data=manxINCforage, aes(x=Longitude,y=Latitude), col = "black", size = 0.05)
+
+####################### speed differences test
+
+nrow(manxforage) / nrow(manx)
+nrow(filter(manxforage, Campaign == "Chick-Rearing")) / nrow(filter(manx, Campaign == "Chick-Rearing"))
+nrow(filter(manxforage, Campaign == "Incubation")) / nrow(filter(manx, Campaign == "Incubation"))
+
+nrow(manxREARcpforage) / nrow(manxREARcp)
+nrow(manxINCcpforage) / nrow(manxINCcp)
+
+nrow(manxREARskforage) / nrow(manxREARsk)
+nrow(manxINCskforage) / nrow(manxINCsk)
+
+# Conc = Regardless of island, and whether overall speed differences are accounted for, 
+#         Incubating manxies spend more time travelling. 
+
+nrow(filter(manx, Ring == "EX98627"))
+nrow(filter(manx, Ring == "EG47299"))
+nrow(filter(manx, Ring == "EA00056"))
+
+table(manx$Ring)
+
+aggregate(data.frame(manx$TripIdentify), list(manx$TripIdentify), length)
+
+length(unique(manx$TripIdentify)) # 339 birds, 773 trips
+
+movement <- structure(list(person = 1:6, activity = c("running", "running", 
+  "walking", "flying", "walking", "running")), class = "data.frame", 
+  row.names = c("1", "2", "3", "4", "5", "6"))
+
+structure(list(manx$TripIdentify))
+
+filter(manx, manx$TripIdentify)
+
+table(manx$TripIdentify)
+
+tripStats = as.data.frame(table(manx$TripIdentify))
+tripStats
+
+library(magrittr)
+library(dplyr)
+
+nrow(manx)
+
+testlist = c("1", "2", "1", "4", "1", "4", "1", "1", "2", "1", "4")
+testlistdf = as.data.frame(testlist)
+testlistdf
+
+testlist= c("ur mum")
+
+testlistdfQ = data.frame
+testlistdfQ
+
+for (testing in testlistdf$testlist) {
+  testlistdfQ = nrow(filter(testlistdf, testlist == testing))
+}
+
+
+
+manxQ = data.frame
+
+for (i in 1:nrow(manx)){
+  manxQ[[i]] = (nrow(filter(manx, manx$TripIdentify == manx$TripIdentify[i])))
+}
+
+for (i in 1:nrow(manx)) {
+  manxQ[[i]] = (nrow(filter(manx, manx$TripIdentify == manx$TripIdentify[[i]])))/12
+}
+
+head(testlistdf)
+head(manx)
+
+manx$TripIdentify[65524]
+
+tripStats
+
+table(manx$TripIdentify)
+
+for (manxing in tripStats) {
+  manxQ = nrow(filter(manx, manx$TripIdentify == ))
+}
+head(manxQ)
+test
+
+tripIDs = as.data.frame(unique(manx$TripIdentify))
+
+tripIDs
+head(tripIDs)
+
+manxQ = data.frame()
+manxQ = list()
+for (i in 1:nrow(tripIDs)) {
+  manxQ[[i]] = as.data.frame((nrow(filter(manx, manx$TripIdentify == tripIDs[i,])))) ### WORKS
+}
+
+manxQ[42]
+tripIDs[42,]
+
+#tripStats = cbind(tripIDs)
+
+#tripStats = cbind(tripStats, Period)
+
+Period = as.data.frame(do.call(rbind, manxQ))/12
+
+Period
+
+
+
+
+
+
+filter(manx, manx$TripIdentify == tripIDs[3,])
+tripIDs[1,]
+test
+
+manxQ = as.data.frame(manxQ)
+head(manxQ)
+
+#tripStats = cbind(tripIDs, manxQ)
+head(tripStats)
+colnames(tripStats) = c("TripID", "Period")
+
+
+manxUniqueTrip = (filter(manx, manx$TripIdentify))
+manxUniqueTrip
+
+
+manxRingAdder2 = data.frame
+
+#manxRingAdder3 = data.frame
+#for (i in 1:nrow(tripStats)){
+  #restrictA = filter(manx, manx$TripIdentify == tripStats$TripID[i])
+  #restrictB = restrictA[!duplicated(restrictA$TripIdentify),]
+  #manxRingAdder3[[i]] <- as.character(restrictB$Ring)
+#}
+
+
+
+
+tripStats
+
+
+
+
+
+
+
+vts$vtse = c(11, 21, 40, 19, 51, 15, 7, 16, 15, 8, 12)
+
+apply(vts[c("vtse")], MARGIN = 2, FUN = mean)
+
+vtsm = list()
+vtsU = vts[!duplicated(vts$stve),]
+for (i in 1:nrow(vts)){
+  ifelse(!duplicated(vts$stve)[i] == TRUE, 
+    meanAppend(i),
+    print("ur mum"))
+}
+
+vtsm
+
+!duplicated(vts$stve)[2]
+
+vts[!duplicated(vts$stve),]
+
+vtsm = append(vtsm, as.factor(mean(filter(vts, stve == vts[x,]$stve)$vtse))
+
+meanAppend = function(x){
+  vtsm = append(vtsm, as.factor(mean(filter(vts, stve == vts[x,]$stve)$vtse)))
+}
+
+meanAppend(5)
+
+testAppend = function(x){
+  testfun = x
+}
+
+testAppend(5)
+testfun
+
+vtsm
+
+filter(vts, stve == vts[6,]$stve)
+
+for (i in 1:nrow(vts)){
+  ifelse(!duplicated(vts$stve),
+    print(vts$stve[i]),)
+}
+
+
+ifelse(!duplicated(vts$stve[1]),
+       print(vts$stve),
+       print("ur mum"))
+
+vts$stve[!duplicated(vts$stve)]
+
+restrict = as.factor(mean(filter(vts, stve == vts[i,]$stve)$vtse))
+vtsm = append(vtsm, restrict)
+
+?if
+?ifelse
+
+vtsm 
+as.data.frame(vtsm)
+vtsm = NULL
+
+nrow(manxforage)
+
+tripStats
+
+PeriodByRing = list()
+for (i in 1:nrow(tripStats)){
+  PeriodByRing = append(PeriodByRing, as.factor(mean(filter(tripStats, Ring == tripStats[i,]$Ring)$Period)))
+}
+as.data.frame(PeriodByRing)
+
+### TripStats
+
+manxStatTrips = manx[!duplicated(manx$TripIdentify),]
+manxStatRings = manxStatTrips$Ring
+manxStatColony = manxStatTrips$Colony
+manxStatCampaign = manxStatTrips$Campaign
+
+as.data.frame(manxStatCampaign)
+
+#tripStats = cbind(tripStats, as.data.frame(manxStatRings), as.data.frame(manxStatColony), as.data.frame(manxStatCampaign))
+
+tripStats
+
+head(manxforage)
+
+
+#Latitude Att 2
+
+manxForageLatitude = list()      
+for (i in 1:nrow(tripStats)){
+  manxForageLatitude[[i]] = mean(filter(manxforage, manxforage$TripIdentify == tripStats$TripID[i])$Latitude)
+  print(as.character(tripStats$TripID[i]))
+}
+manxForageLatitude = list()
+for (i in 1:nrow(tripStats)){
+  filtLat = mean(filter(manxforage, manxforage$TripIdentify == tripStats$TripID[i])$Latitude)
+  manxForageLatitude[[i]] = filtLat
+  print(as.character(tripStats$TripID[i]))    # WORKS,
+}
+      
+manxForageLongitude = list()
+for (i in 1:nrow(tripStats)){
+  filtLong = mean(filter(manxforage, manxforage$TripIdentify == tripStats$TripID[i])$Longitude)
+  manxForageLongitude[[i]] = filtLong
+  print(as.character(tripStats$TripID[i]))
+}
+
+meanLocations = cbind(as.data.frame(do.call(rbind, manxForageLatitude)), as.data.frame(do.call(rbind, manxForageLongitude)))
+
+#tripStats = cbind(tripStats, as.data.frame(do.call(rbind, manxForageLatitude)), as.data.frame(do.call(rbind, manxForageLongitude)))
+
+tripStats
+colnames(tripStats) = c("TripID", "Period", "Ring", "Colony", "Campaign", "meanForageLat", "meanForageLong", "distIsland")
+
+as.data.frame(manxForageLatitude)
+as.data.frame(manxForageLongitude)
+
+data.class(filtLat)
+
+tripStats
+
+#manxForageLatitude = list()
+#for (i in 1:nrow(manxforage)){
+#  manxForageLatitude = append(manxForageLatitude, as.factor(mean(filter(manxforage, TripIdentify == manxforage[i,]$TripIdentify)$Latitude)))
+#}
+#head(as.data.frame(manxForageLatitude))
+
+### ^ v this is the shit that takes 10 hours don't do it (correct version above)
+
+#manxForageLongitude = list()
+#for (i in 1:nrow(manxforage)){
+#  manxForageLongitude = append(manxForageLongitude, as.factor(mean(filter(manxforage, TripIdentify == manxforage[i,]$TripIdentify)$Longitude)))
+#}
+#head(as.data.frame(manxForageLongitude))
+
+tripIDs = NULL
+
+mean(manxforage$Longitude)
+
+CopelandLoc = c(54.695059, -5.524853)
+SkomerLoc = c(51.73649, -5.2968227)
+
+distanceVectorcp = list()
+for (i in 1:nrow(filter(tripStats, Colony == "cp"))){
+  dVrestrict = as.numeric(c(as.character(filter(tripStats, Colony == "cp")$meanForageLat[i]), 
+                            as.character(filter(tripStats, Colony == "cp")$meanForageLong[i]))) - (CopelandLoc)
+  distanceVectorcp[[i]] = dVrestrict
+}
+
+distanceVectorsk = list()
+for (i in 1:nrow(filter(tripStats, Colony == "sk"))){
+  dVrestrict = as.numeric(c(as.character(filter(tripStats, Colony == "sk")$meanForageLat[i]), 
+                            as.character(filter(tripStats, Colony == "sk")$meanForageLong[i]))) - (SkomerLoc)
+  distanceVectorsk[[i]] = dVrestrict
+}
+
+distanceVectorAll = rbind(as.data.frame(do.call(rbind, distanceVectorcp)),
+                          as.data.frame(do.call(rbind, distanceVectorsk)))
+
+distanceVectorAll
+
+tripStats
+
+
+norm(distanceVectorAll[1,], type = "2") #calculates vector modulus
+
+distanceScalarAll = list()
+for (i in 1:nrow(distanceVectorAll)){
+  distanceScalarAll[[i]] = norm(distanceVectorAll[i,], type = "2")
+}
+
+distanceScalarAll[1]
+distIsland = as.data.frame(do.call(rbind, distanceScalarAll))
+distIsland
+
+hist(distIsland) # not normal, should transform
+hist(tripStats$Period) # also not normal 
+
+hist(log(distIsland$V1))
+hist(log(tripStats$Period))
+
+data.class(log(tripStats$Period))
+data.class(as.numeric(log(distIsland))) ### CONVERT TO numeric vector then run the correlation test below :)
+
+cor.test(as.numeric(as.vector(log(distIsland))), as.numeric(as.vector(log(tripStats$Period))))
+cor.test(log(distIsland$V1), log(tripStats$Period))
+
+#tripStats = cbind(tripStats, distIsland)
+
+head(tripStats)
+
+write.csv(tripStats,"~/Notes Biology/Copeland Manxies/Trip Stats.csv", row.names = FALSE)
+
+data.class(distanceVectorAll)
+
+islandDistance = 
+
+tripStats[16,]
+CopelandLoc
+
+as.data.frame(distanceVectorcp)
+data.frame(distanceVectorcp)
+
+dVrestrict = as.numeric(c(as.character(filter(tripStats, Colony == "cp")$meanLongitude[1]), 
+             as.character(filter(tripStats, Colony == "cp")$meanLatitude[1]))) - (CopelandLoc)
+
+as.data.frame(do.call(rbind, distanceVectorcp))
+
+listinglmao = list()
+
+listinglmao[[1]] = dVrestrict
+listinglmao
+
+filter(tripStats, Colony == "cp")$meanLongitude
+
+as.numeric(c(as.character(tripStats$meanLongitude[1]), as.character(tripStats$meanLatitude[1]))) - (CopelandLoc)
+
+tripStats$Colony
+
+as.numeric(c(as.character(tripStats$meanLongitude[1]), as.character(tripStats$meanLatitude[1])))
+
+as.numeric(tripStats$meanLongitude[1])
+data.class(1)
+
+## copeland location = 54.695059, -5.524853
+## skomer location = 51.736497, -5.296822
+
+#### PLOTTING PART 2 
+
+
+## PERIOD violin-plot
+
+ggplot(tripStats, aes(Colony, Period)) + 
+  geom_violin(data = tripStats, aes(Campaign, Period/24), fill = "#f7d04a", colour = "#e6b409", lwd=2) +
+  facet_wrap(~ Colony, ncol = 2) + 
+  ylab("ln Trip Period (days)") + 
+  theme(axis.text.x=element_text(size=13,colour="#001d3d"), panel.grid.major=element_line(colour="#d5e5ed"), panel.grid.minor=element_line(colour="#d5e5ed"), aspect.ratio=5/6,
+        axis.title=element_text(size=13,colour="#001d3d", face = "bold"),panel.background=element_rect(fill="#eef5fd"), axis.text.y=element_text(size=13,colour="#001d3d"), plot.background=element_rect(fill="#7EACC8")) + 
+  scale_y_log10()  
+  
+
+#graphresults
+
+ggplot() + 
+  geom_violin(data = tripStatssk, aes(Campaign, log(Period)), fill = "#f06748", colour = "#e03009"), linetype = 1) 
+  #scale_fill_manual(values = c("#aaddff", "#ff9999")) + 
+  #scale_colour_manual(values = c("#4466cc", "#bb0000")) "#f06748", "#e6b409", "#e6b409", "#f7d04a"
+  
+?geom_violin
+
+
+hist(log(tripStats$Period))
+hist(log(filter(tripStats, Campaign == "Chick-Rearing", Colony == "cp")$Period))
+hist(log(filter(tripStats, Campaign == "Incubation", Colony == "cp")$Period))
+hist(log(filter(tripStats, Campaign == "Chick-Rearing", Colony == "sk")$Period))
+hist(log(filter(tripStats, Campaign == "Incubation", Colony == "sk")$Period))
+
+
+library(car)
+### Need to test for normality to apply t test
+
+qqPlot(log(filter(tripStats, Campaign == "Chick-Rearing", Colony == "cp")$Period))
+qqPlot(log(filter(tripStats, Campaign == "Incubation", Colony == "cp")$Period))
+qqPlot(log(filter(tripStats, Campaign == "Chick-Rearing", Colony == "sk")$Period))
+qqPlot(log(filter(tripStats, Campaign == "Incubation", Colony == "sk")$Period))
+
+shapiro.test(log(filter(tripStats, Campaign == "Chick-Rearing", Colony == "cp")$Period))
+shapiro.test(log(filter(tripStats, Campaign == "Incubation", Colony == "cp")$Period))
+shapiro.test(log(filter(tripStats, Campaign == "Chick-Rearing", Colony == "sk")$Period))
+shapiro.test(log(filter(tripStats, Campaign == "Incubation", Colony == "sk")$Period))
+
+# All are significantly different from normal
+
+shapiro.test(tripStatscp$logDistIsland)
+shapiro.test(tripStatssk$logDistIsland)
+qqPlot(tripStatscp$logDistIsland)
+qqPlot(tripStatssk$logDistIsland)
+hist(tripStatscp$logDistIsland)
+hist(tripStatssk$logDistIsland)
+
+# neither dependent variable significantly differs from normal at 1% sig level. 
+
+## MANN WHITNEY U TEST
+
+wilcox.test(Period ~ Campaign, data = filter(tripStats, Colony == "cp"), exact = FALSE)
+wilcox.test(Period ~ Campaign, data = filter(tripStats, Colony == "sk"), exact = FALSE)
+# Period is significantly different by campaign (longer for incubators)
+
+# Do one t test for each colony, see which is significant?
+
+## DISTANCE linear regression with lines for status and panels for cp/sk
+
+distPeriodRegression = lm(log(distIsland$V1) ~ log(tripStats$Period))
+dpRegressionINCcp = lm(log(filter(tripStats, Colony == "cp", Campaign == "Incubation")$distIsland) ~ 
+                         log(filter(tripStats, Colony == "cp", Campaign == "Incubation")$Period))
+dpRegressionREARcp = lm(log(filter(tripStats, Colony == "cp", Campaign == "Chick-Rearing")$distIsland) ~ 
+                          log(filter(tripStats, Colony == "cp", Campaign == "Chick-Rearing")$Period))
+dpRegressionINCsk = lm(log(filter(tripStats, Colony == "sk", Campaign == "Incubation")$distIsland) ~ 
+                         log(filter(tripStats, Colony == "sk", Campaign == "Incubation")$Period))
+dpRegressionREARsk = lm(log(filter(tripStats, Colony == "sk", Campaign == "Chick-Rearing")$distIsland) ~ 
+                          log(filter(tripStats, Colony == "sk", Campaign == "Chick-Rearing")$Period))
+
+
+filter(tripStats, Colony == "sk", Campaign == "Chick-Rearing")$distIsland
+  
+ggplot(tripStats, aes(x=log(Period), y=log(distIsland))) + #thick points correspond to days
+  geom_point(data = filter(tripStats, Campaign == "Chick-Rearing"), aes(x=log(Period),y=log(distIsland)), col = "#fAcff9", alpha = 0.8) +
+  geom_point(data = filter(tripStats, Campaign == "Incubation"), aes(x=log(Period),y=log(distIsland)), col = "#A9C8f5", alpha = 0.8) + 
+  geom_smooth(data = filter(tripStats, Campaign == "Chick-Rearing"), aes(x=log(Period),y=log(distIsland)), col = "#f13ff5", fill = "white", lwd=1.4, alpha = 0.8, method=(lm)) + 
+  geom_smooth(data = filter(tripStats, Campaign == "Incubation"), aes(x=log(Period),y=log(distIsland)), col = "#2A5Bc9", fill = "white", lwd=1.4, alpha = 0.8, method=(lm)) + 
+  #theme_dark() +#%+replace%
+  theme(panel.grid.major=element_line(colour="#d5e5ed"), panel.grid.minor=element_line(colour="#d5e5ed"),
+        panel.background=element_rect(colour="#001d3d", fill = "#eef5fd"), aspect.ratio=0.85, plot.background=element_rect(fill="#7eacc8")) + 
+  theme(axis.text.x=element_text(size=13,colour="#001d3d"), axis.title=element_text(size=14,colour="#001d3d", face = "bold"),axis.text.y=element_text(size=13,colour="#001d3d")) +
+  facet_wrap(~ Colony, ncol = 2) + 
+  coord_cartesian(ylim=c(-3.5,2.5)) +
+  xlab("ln Trip Period") + ylab("ln Mean Foraging Distance")
+
+ #graphresults #2A5B89 #113565
+
+ggplot(tripStats, aes(x=log(Period), y=log(distIsland))) + #thick points correspond to days
+  geom_point(data = filter(tripStats, Campaign == "Chick-Rearing"), aes(x=log(Period),y=log(distIsland)), col = "#e03009", alpha = 1) +
+  geom_point(data = filter(tripStats, Campaign == "Incubation"), aes(x=log(Period),y=log(distIsland)), col = "#c69703", alpha = 1) + 
+  geom_smooth(data = filter(tripStats, Campaign == "Chick-Rearing"), aes(x=log(Period),y=log(distIsland)), col = "#f0b0a0", fill = "grey70", lwd=1.4, alpha = 0.6, method=(lm)) + 
+  geom_smooth(data = filter(tripStats, Campaign == "Incubation"), aes(x=log(Period),y=log(distIsland)), col = "#f0e070", fill = "grey70", lwd=1.4, alpha = 0.6, method=(lm)) + 
+  #theme_dark() +#%+replace%
+  theme(panel.grid.major=element_line(colour="#d5e5ed"), panel.grid.minor=element_line(colour="#d5e5ed"),
+        panel.background=element_rect(colour="#001d3d", fill = "#eef5fd"), aspect.ratio=1, plot.background=element_rect(fill="#7eacc8")) + 
+  facet_wrap(~ Colony, ncol = 2) + 
+  coord_cartesian(ylim=c(-3.5,2.5)) 
+
+plot(residuals(distPeriodRegression)) ## consistent
+
+## ANCOVA ATTEMPTS 
+
+
+tripStats$logPeriod = log(tripStats$Period)
+tripStats$logDistIsland = log(tripStats$distIsland)
+
+tripStatscp = filter(tripStats, Colony == "cp")
+
+dpNImodelcp = lm(logDistIsland ~ logPeriod + Campaign, data = tripStatscp)
+dpFullmodelcp = lm(logDistIsland ~ logPeriod * Campaign, data = tripStatscp)
+
+
+tripStatscp$fitNI = predict(dpNImodelcp)
+tripStatscp$fitFull = predict(dpFullmodelcp)
+
+ggplot(tripStatscp, aes(x=logPeriod, y=logDistIsland, colour = Campaign)) + # NI Model for Copeland
+  geom_point(aes(colour = Campaign)) + 
+  geom_line(data = subset(tripStatscp, Campaign == "Incubation"), aes(y=fitNI), linewidth = 1, colour = "#4466cc") +
+  geom_line(data = subset(tripStatscp, Campaign == "Chick-Rearing"), aes(y=fitNI), linewidth = 1, colour = "#bb0000") +
+  scale_colour_manual(values = c("#aaddff", "#ff9999"))
+
+ggplot(tripStatscp, aes(x=logPeriod, y=logDistIsland, colour = Campaign)) + # Full Model for Copeland
+  geom_point(aes(colour = Campaign)) + 
+  geom_line(data = subset(tripStatscp, Campaign == "Incubation"), aes(y=fitFull), linewidth = 1, colour = "#4466cc") +
+  geom_line(data = subset(tripStatscp, Campaign == "Chick-Rearing"), aes(y=fitFull), linewidth = 1, colour = "#bb0000") +
+  scale_colour_manual(values = c("#aaddff", "#ff9999"))
+
+anova(dpNImodelcp, dpFullmodelcp) #no significant interaction factor
+
+anova(dpFullmodelcp) # SIGNIFICANT DIFFERENCE FROM REGRESSION, with no interaction factor
+# Incubating manxies go further with respect to the amount of time they're gone for. 
+
+
+# Same for Skomer
+
+
+tripStatssk = filter(tripStats, Colony == "sk")
+
+dpNImodelsk = lm(logDistIsland ~ logPeriod + Campaign, data = tripStatssk)
+dpFullmodelsk = lm(logDistIsland ~ logPeriod * Campaign, data = tripStatssk)
+
+tripStatssk$fitNI = predict(dpNImodelsk)
+tripStatssk$fitFull = predict(dpFullmodelsk)
+
+ggplot(tripStatssk, aes(x=logPeriod, y=logDistIsland, colour = Campaign)) + # NI Model for Skomer
+  geom_point(aes(colour = Campaign)) + 
+  geom_line(data = subset(tripStatssk, Campaign == "Incubation"), aes(y=fitNI), linewidth = 1, colour = "#4466cc") +
+  geom_line(data = subset(tripStatssk, Campaign == "Chick-Rearing"), aes(y=fitNI), linewidth = 1, colour = "#bb0000") +
+  scale_colour_manual(values = c("#ff9999", "#aaddff"))
+
+ggplot(tripStatssk, aes(x=logPeriod, y=logDistIsland, colour = Campaign)) + # Full Model for Skomer
+  geom_point(aes(colour = Campaign)) + 
+  geom_line(data = subset(tripStatssk, Campaign == "Incubation"), aes(y=fitFull), linewidth = 1, colour = "#4466cc") +
+  geom_line(data = subset(tripStatssk, Campaign == "Chick-Rearing"), aes(y=fitFull), linewidth = 1, colour = "#bb0000") +
+  scale_colour_manual(values = c("#ff9999", "#aaddff"))
+
+#ggplot(tripStatssk, aes(x=logPeriod, y=logDistIsland, colour = Campaign)) + # Full Model for Skomer
+  #geom_point(aes(colour = Campaign)) + 
+  #stat_smooth(data = subset(tripStatssk, Campaign == "Incubation"), aes(y=fitFull), linewidth = 1, colour = "#4466cc", se = TRUE) +
+  #stat_smooth(data = subset(tripStatssk, Campaign == "Chick-Rearing"), aes(y=fitFull), linewidth = 1, colour = "#bb0000", se = TRUE) +
+  #stat_smooth(data=tripStatssk, aes(fill = Campaign), se=TRUE) + 
+  #scale_colour_manual(values = c("#aaddff", "#ff9999"))
+
+anova(dpNImodelsk, dpFullmodelsk) ## SIGNIFICANT INTERACTION FACTOR FOR SKOMER ONLY
+
+anova(dpFullmodelsk) # no significant difference away from time spent regression. 
+# There is a CROSSOVER EFFECT, chick-rearing manxies period has less of an effect on forage distance
+
+# ASSUMPTIONS OF ANCOVA:
+
+leveneTest(data = tripStatscp, logDistIsland ~ Campaign)
+leveneTest(data = tripStatssk, logDistIsland ~ Campaign)
+var(filter(tripStatssk, Campaign == "Incubation")$logDistIsland)       # These are also variances
+var(filter(tripStatssk, Campaign == "Chick-Rearing")$logDistIsland)    # between individual foraging  
+#variances differ significantly P = 0.011 for sk. SUSPECT              # trips on each island. 
+var(filter(tripStatscp, Campaign == "Incubation")$logDistIsland)
+var(filter(tripStatscp, Campaign == "Chick-Rearing")$logDistIsland)
+
+plot(residuals(dpFullmodelcp))
+plot(residuals(dpFullmodelsk))
+# residuals don't change. 
+
+################################### Test Variable
+
+anchoving <- data.frame(ID=1:20,
+  y=c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20),
+  z=c('z1','z1','z1','z1','z1','z1','z1','z1','z1','z1','z2','z2','z2','z2','z2','z2','z2','z2','z2','z2'),
+  x=c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20))
+
+anchovingr <- data.frame(ID=1:20,
+                        y=c(1, 2, 2, 4, 6, 6, 7, 11, 9, 10, 9, 12, 11, 8, 15, 16, 19, 19, 16, 21),
+                        z=c('z1','z1','z1','z1','z1','z1','z2','z2','z1','z1','z2','z2','z1','z2','z1','z2','z2','z2','z2','z2'),
+                        x=c(2, 1, 4, 7, 5, 7, 7, 8, 11, 10, 11, 15, 13, 12, 18, 17, 17, 14, 18, 22))
+
+
+anchoving
+anchovingr
+
+anchovinglm = lm(y ~ x * z, data = anchoving)
+anchovingrlm = lm(y ~ x * z, data = anchovingr)
+
+t.test(y~z, anchovingr)
+
+anova(anchovingrlm)
+
+##################################################################################################
+unique(filter(manx, Colony == "cp", Year == "2023", Campaign == "Chick-Rearing")$Ring)
+
+write.csv(unique(tripStatssk$Ring),"~/Notes Biology/Copeland Manxies/Skomer Tracked.csv", row.names = FALSE)
+
+
+### BURROW STATS
+
+
+burrowStats = read.csv("C:/Users/maxsh/OneDrive/Documents/Notes Biology/Copeland Manxies/Burrow Stats.csv", na.strings=c(""," ","NA"))
+head(burrowStats)
+colnames(burrowStats) = c("Ring","Sex","Lay","Hatch","Year")
+
+burrowStats$hatchPOSIXct = as.POSIXct((burrowStats$Hatch), format = "%d/%m/%Y", tz = "GMT")
+
+hist(filter(burrowStats,Year=="2021")$hatchPOSIXct, breaks = 20)
+hist(filter(burrowStats,Year=="2022")$hatchPOSIXct, breaks = 20)
+hist(filter(burrowStats,Year=="2023")$hatchPOSIXct, breaks = 20)
+
+burrowStats$yday = yday(burrowStats$hatchPOSIXct)
+hist(burrowStats$yday)
+
+burrowStats$hatchDate = format(burrowStats$Hatch, format="%d/%m")
+burrowStats$hatchDate = NULL
+
+head(tripStatssk)
+
+head(merge(tripStatssk, burrowStats, by = "Ring"))
+nrow(merge(tripStatssk, burrowStats, by = "Ring", all.x=TRUE))
+
+
+tripBurrowed = left_join(tripStatssk, burrowStats, by = "Ring")
+
+nrow(tripBurrowed)
+head(tripBurrowed)
+
+cor.test(tripBurrowed$yday, tripBurrowed$logDistIsland) # uncorrelated hatch + distance
+t.test(logDistIsland ~ Sex, data = tripBurrowed, var.equal=FALSE) # CORRELATED sex + distance
+
+cor.test(tripBurrowed$yday, tripBurrowed$logPeriod) # uncorrelated hatch + period
+t.test(logPeriod ~ Sex, data = tripBurrowed, var.equal=FALSE) # CORRELATED sex + period
+
+
+ggplot(tripBurrowed[!is.na(tripBurrowed$Sex),], aes(Sex, logDistIsland, fill = Sex, colour = Sex)) + 
+  geom_violin() +
+  scale_fill_manual(values = c("#aaddff", "#ff9999")) + 
+  scale_colour_manual(values = c("#4466cc", "#bb0000"))
+ggplot(tripBurrowed[!is.na(tripBurrowed$Sex),], aes(Sex, logPeriod, fill = Sex, colour = Sex)) + 
+  geom_violin() +
+  scale_fill_manual(values = c("#aaddff", "#ff9999")) + 
+  scale_colour_manual(values = c("#4466cc", "#bb0000"))
+
+mean(filter(tripBurrowed, Sex =="M")$logDistIsland) - mean(filter(tripBurrowed, Sex =="F")$logDistIsland)
+mean(filter(tripBurrowed, Sex =="M")$logPeriod) - mean(filter(tripBurrowed, Sex =="F")$logPeriod)
+
+
+## TEST FOR CORRELATION between INPUTS
+
+tableSexCampaign = table(tripBurrowed$Sex, tripBurrowed$Campaign)
+chisq.test(tableSexCampaign) # Sex and Campaign are (barely) uncorrelated. 
+tableSexCampaign # Pretend Yates used because of small expected frequencies. 
+
+t.test(yday ~ Sex, data = tripBurrowed, var.equal=FALSE)       # Both sex and campaign are 
+t.test(yday ~ Campaign, data = tripBurrowed, var.equal=FALSE)  # independent with hatch date. 
+
+
+## ANOVA between HATCH, CAMPAIGN.
+
+tripBurrowedHO = tripBurrowed[!is.na(tripBurrowed$yday),]
+
+dhNImodelStatus = lm(logDistIsland ~ yday + Campaign, data = tripBurrowedHO)
+dhFullmodelStatus = lm(logDistIsland ~ yday * Campaign, data = tripBurrowedHO)
+
+tripBurrowedHO
+
+tripBurrowedHO$statusNI = predict(dhNImodelStatus)
+tripBurrowedHO$statusFull = predict(dhFullmodelStatus)
+
+ggplot(tripBurrowedHO, aes(x=yday, y=logDistIsland, colour = Campaign)) + 
+  geom_point(aes(colour = Campaign)) + 
+  geom_line(data = subset(tripBurrowedHO, Campaign == "Incubation"), aes(y=statusNI), linewidth = 1, colour = "#4466cc") +
+  geom_line(data = subset(tripBurrowedHO, Campaign == "Chick-Rearing"), aes(y=statusNI), linewidth = 1, colour = "#bb0000") +
+  scale_colour_manual(values = c("#ff9999", "#aaddff"))
+ggplot(tripBurrowedHO, aes(x=yday, y=logDistIsland, colour = Campaign)) +
+  geom_point(aes(colour = Campaign)) + 
+  geom_line(data = subset(tripBurrowedHO, Campaign == "Incubation"), aes(y=statusFull), linewidth = 1, colour = "#4466cc") +
+  geom_line(data = subset(tripBurrowedHO, Campaign == "Chick-Rearing"), aes(y=statusFull), linewidth = 1, colour = "#bb0000") +
+  scale_colour_manual(values = c("#ff9999", "#aaddff"))
+
+anova(dhFullmodelStatus) #nothing except correlation with Campaign
+
+tripBurrowedSO = tripBurrowed[!is.na(tripBurrowed$Sex),]
+dhFullmodelSex =lm(logDistIsland ~ yday * Sex, data = tripBurrowedSO)
+anova(dhFullmodelSex)
+
+## TRIP YDAY
+
+tripStats$tripStart = yday(filter(manx, duplicated(manx$TripIdentify) == FALSE)$POSIXct + 5*60*60)
+
+tripBurrowed
+tripStats
+
+head(tripStats)
+
+cor.test(tripStats$tripStart, tripStats$Period) # later trips are shorter,
+t.test(tripStart ~ Campaign, data = tripStats, var.equal=FALSE) # ^ because they are chick-rearing
+t.test(tripStart ~ Sex, data = tripBurrowed, var.equal=FALSE) # 
+
+
+### SEX CAMPAIGN TWO-WAY ANOVA
+
+
+ggplot(tripBurrowedSO, aes(x = Sex, y = Period, colour = Campaign)) + 
+  geom_boxplot()
+ggplot(tripBurrowedSO, aes(x = Campaign, y = Period, colour = Sex)) + 
+  geom_boxplot()
+
+ggplot(tripBurrowedSO, aes(x=Sex,y=logPeriod,colour=Campaign,fill=Campaign)) + 
+  geom_boxplot(lwd=1.43) + 
+  scale_fill_manual(values = c("#aaddff", "#ff9999")) + 
+  scale_colour_manual(values = c("#4466cc", "#bb0000")) 
+
+ggplot(tripBurrowedSO, aes(x=Campaign,y=logDistIsland,colour=Sex,fill=Sex)) + 
+  geom_boxplot(lwd=1.43, outlier.shape = NA) + 
+  scale_fill_manual(values = c("#aaddff", "#ff9999")) + 
+  scale_colour_manual(values = c("#4466cc", "#bb0000")) +
+  coord_cartesian(ylim=c(-2,2))
+"#f06748", "#e6b409", "#e03009", "#f7d04a"
+
+ggplot(tripBurrowedSO, aes(x=Sex,y=logDistIsland,colour=Campaign,fill=Campaign)) + # Sex + Campaign
+  geom_boxplot(lwd=1.43, outlier.shape = NA) + 
+  scale_fill_manual(values = c("#fa8768", "#fce07a")) + 
+  scale_colour_manual(values = c("#e03009", "#e6b409")) +
+  coord_cartesian(ylim=c(-1.7,1.7)) + 
+  ylab("ln Mean Foraging Distance") +
+  theme(aspect.ratio=3/5, panel.background = element_rect(fill="#eef5fd"), panel.grid=element_line(colour="#d5e5ed"), axis.text.x=element_text(size=15,colour="#001d3d", face = "bold"), 
+        axis.title=element_text(size=13,colour="#001d3d", face="bold"), axis.text.y=element_text(size=13,colour="#001d3d"), plot.background=element_rect(fill="#7EACC8"))
+
+# graphresults
+
+ggplot(tripBurrowedSO, aes(x=Sex,y=Period,colour=Campaign,fill=Campaign)) + 
+  geom_boxplot(lwd=1.43) + 
+  scale_fill_manual(values = c("#aaddff", "#ff9999")) + 
+  scale_colour_manual(values = c("#4466cc", "#bb0000"))
+
+summary(aov(Period ~ Sex + Campaign, data = tripBurrowedSO))
+summary(aov(Period ~ Sex * Campaign, data = tripBurrowedSO))
+
+summary(aov(logPeriod~Sex*Campaign,data=tripBurrowedSO))  # Both significant, no interaction. 
+
+summary(aov(logDistIsland~Sex*Campaign,data=tripBurrowedSO))
+
+aov(logDistIsland~Sex*Campaign,data=tripBurrowedSO)
+
+# t testing between m/f for each period.
+
+t.test(logPeriod~Sex, data=filter(tripBurrowedSO, Campaign == "Incubation")) 
+t.test(logPeriod~Sex, data=filter(tripBurrowedSO, Campaign == "Chick-Rearing"))
+
+t.test(logDistIsland~Sex, data=filter(tripBurrowedSO, Campaign == "Incubation"))
+t.test(logDistIsland~Sex, data=filter(tripBurrowedSO, Campaign == "Chick-Rearing")) # all insignificant
+
+
+mean(filter(tripBurrowedSO, Sex == "F", Campaign == "Chick-Rearing")$logPeriod)
+mean(filter(tripBurrowedSO, Sex == "F", Campaign == "Incubation")$logPeriod)
+mean(filter(tripBurrowedSO, Sex == "M", Campaign == "Chick-Rearing")$logPeriod)
+mean(filter(tripBurrowedSO, Sex == "M", Campaign == "Incubation")$logPeriod)
+
+mean(filter(tripBurrowedSO, Sex == "F", Campaign == "Incubation")$logDistIsland)
+mean(filter(tripBurrowedSO, Sex == "M", Campaign == "Incubation")$logDistIsland)
+
+## PCA Attempt ... is a fail
+
+## Attempt at within individual foraging variance (finally)
+
+manxForageVarLatitude = list()
+for (i in 1:nrow(tripStats)){
+  filtVarLat = var(filter(manxforage, manxforage$TripIdentify == tripStats$TripID[i])$Latitude)
+  manxForageVarLatitude[[i]] = filtVarLat
+  print(as.character(tripStats$TripID[i]))    # WORKS,
+}
+
+manxForageVarLongitude = list()
+for (i in 1:nrow(tripStats)){
+  filtVarLong = var(filter(manxforage, manxforage$TripIdentify == tripStats$TripID[i])$Longitude)
+  manxForageVarLongitude[[i]] = filtVarLong
+  print(as.character(tripStats$TripID[i]))
+}
+
+var(filter(manxforage, manxforage$TripIdentify == tripStats$TripID[5])$Longitude)
+
+locationVariances = cbind(as.data.frame(do.call(rbind, manxForageVarLatitude)), as.data.frame(do.call(rbind, manxForageVarLongitude)))
+
+manxForageVarLatitude
+
+locationVariances
+
+forageVarScalar = list()
+for (i in 1:nrow(locationVariances)){
+  forageVarScalar[[i]] = norm(locationVariances[i,], type = "2")
+}
+
+
+forageVarScalar[1]
+LocVariance = as.data.frame(do.call(rbind, forageVarScalar))
+colnames(LocVariance) = c("LocVariance")
+LocVariance
+
+tripStats
+
+t.test(LocVariance ~ Campaign, data = tripStats, var.equal = FALSE) # Campaign + location variance uncorrelated
+
+## Pls attempt (grasping at straws here)
+
+#install.packages("pls")
+#library(pls)
+
+#head(tripStats)
+
+#plsDateStatusModel = plsr(logPeriod~Campaign+tripStart+Colony, data=tripStats, scale=TRUE, validation="CV")
+
+#summary(plsDateStatusModel)
+
+#validationplot(plsDateStatusModel)
+
+#library(caret)
+
+### copypaste time
+
+#training.samples <- tripStats$logPeriod %>%
+#  createDataPartition(p = 0.8, list = FALSE)
+#train.data  <- tripStats[training.samples, ]
+#test.data <- tripStats[-training.samples, ]
+
+#head(tripStats)
+
+#modelCaretDateStatus <- train(
+#  logPeriod~., data = tripStats, method = "pcr",
+#  scale = TRUE,
+#  trControl = trainControl("cv", number = 10),
+#  tuneLength = 10)
+
+# haha L
+
+#### GPS imaging 
+
+GPSsamplesk = sample((467:773),20)
+GPSsamplecp = sample(1:nrow(filter(tripStats, Colony=="cp")),20)
+GPSsample = c(GPSsamplecp,GPSsamplesk)
+GPSsample
+GPSsample1
+
+tripStats[GPSsample,]$Ring
+
+library(ggpattern)
+
+ggplot(worldmappingsf) + 
+  geom_sf(col="#b5bac5",fill="#d5e0e5", linewidth=0.565) +
+  geom_path(data=filter(manx,Ring %in% tripStats[GPSsample1,]$Ring), 
+            aes(x=Longitude,y=Latitude,colour=Ring), show.legend=FALSE) +
+  #geom_point(data=filter(manxforage,Ring %in% tripStats[GPSsample,]$Ring), 
+  #           aes(x=Longitude,y=Latitude,colour="grey30"), size = 0.2,colour="grey30",alpha=0.5, show.legend=FALSE) + 
+  #geom_path(data=filter(manx, Year == "2023", Campaign == "Incubation"), 
+  #          aes(x=Longitude,y=Latitude,colour=Ring), show.legend=FALSE) +
+  #geom_point(data=filter(manxforage, Year == "2023", Campaign == "Incubation"), 
+  #           aes(x=Longitude,y=Latitude,colour="grey30"), size = 0.2, show.legend=FALSE) + 
+  
+  scale_colour_manual(values= scales::seq_gradient_pal(low = "#0035aa", high = "#eFb602", space = "Lab")(1:40/40)) +
+  theme_classic() + theme(panel.background = element_rect(fill = '#eef8fc')) + 
+  annotate("point", x = CopelandLoc[2], y=CopelandLoc[1], colour = "black", size = 2) + 
+  annotate("text", x = CopelandLoc[2], y = CopelandLoc[1], label = "Copeland", colour = "#001155", hjust = 1.1, size = 6) + 
+  annotate("point", x = SkomerLoc[2], y=SkomerLoc[1], colour = "black", size = 2) +
+  annotate("text", x = SkomerLoc[2], y = SkomerLoc[1], label = "Skomer", colour = "#001155", hjust = -0.2, vjust=-0.1, size = 6) + 
+  #labs(col = "the legend") + scale_colour_manual(values = legend_col) + 
+  #coord_sf(xlim=c(-16,1),ylim=c(50,59))
+  #coord_sf(xlim=c(-8,-3),ylim=c(51,56)) 
+  #coord_sf(xlim=c(-6,-5),ylim=c(54.3,55))
+  coord_sf(xlim=c(-17,2),ylim=c(49,60))
+#geom_point(data=manxINCforage, aes(x=Longitude,y=Latitude), col = "black", size = 0.05)
+
+## For just the sexed manxes as well 
+
+ggplot(worldmappingsf) + 
+  geom_sf(col="#b5bac5",fill="#d5e0e5", linewidth=0.565) +
+  geom_path(data=filter(manx,Ring %in% tripBurrowedHO$Ring), 
+            aes(x=Longitude,y=Latitude,colour=Ring), show.legend=FALSE) +
+  #geom_point(data=filter(manxforage,Ring %in% tripStats[GPSsample,]$Ring), 
+  #           aes(x=Longitude,y=Latitude,colour="grey30"), size = 0.2,colour="grey30",alpha=0.5, show.legend=FALSE) + 
+  #geom_path(data=filter(manx, Year == "2023", Campaign == "Incubation"), 
+  #          aes(x=Longitude,y=Latitude,colour=Ring), show.legend=FALSE) +
+  #geom_point(data=filter(manxforage, Year == "2023", Campaign == "Incubation"), 
+  #           aes(x=Longitude,y=Latitude,colour="grey30"), size = 0.2, show.legend=FALSE) + 
+  
+  scale_colour_manual(values= scales::seq_gradient_pal(low = "#0035aa", high = "#eFb602", space = "Lab")(1:43/43)) +
+  theme_classic() + theme(panel.background = element_rect(fill = '#eef8fc')) + 
+  annotate("point", x = CopelandLoc[2], y=CopelandLoc[1], colour = "black", size = 2) + 
+  annotate("text", x = CopelandLoc[2], y = CopelandLoc[1], label = "Copeland", colour = "#001155", hjust = 1.1, size = 6) + 
+  annotate("point", x = SkomerLoc[2], y=SkomerLoc[1], colour = "black", size = 2) +
+  annotate("text", x = SkomerLoc[2], y = SkomerLoc[1], label = "Skomer", colour = "#001155", hjust = -0.2, vjust=-0.1, size = 6) + 
+  #labs(col = "the legend") + scale_colour_manual(values = legend_col) + 
+  #coord_sf(xlim=c(-16,1),ylim=c(50,59))
+  #coord_sf(xlim=c(-8,-3),ylim=c(51,56)) 
+  #coord_sf(xlim=c(-6,-5),ylim=c(54.3,55))
+  coord_sf(xlim=c(-17,2),ylim=c(49,60))
+#geom_point(data=manxINCforage, aes(x=Longitude,y=Latitude), col = "black", size = 0.05)
+
+test
+
+library(VCA)
+
+varPlot(form=logDistIsland~(Campaign)/logPeriod, Data=tripStats)
+
+?VCA
+remlVCA(form=logDistIsland~(Campaign)/logPeriod, Data=tripStats)
+VCAinference(remlVCA(form=logDistIsland~(Campaign)/logPeriod, Data=tripStats))
+
+?VCAinference
+
+## LATITUDE by STATUS 
+
+head(tripStats)
+
+cor.test(tripStats$tripStart, tripStats$meanForageLat) # neg, P-7
+cor.test(tripStats$tripStart, tripStats$meanForageLong) # pos, P-3
+
+cor.test(tripStatscp$tripStart, tripStatscp$meanForageLat) # insignificant
+cor.test(tripStatscp$tripStart, tripStatscp$meanForageLong) # insignificant
+
+cor.test(tripStatssk$tripStart, tripStatssk$meanForageLat) # insignificant
+cor.test(tripStatssk$tripStart, tripStatssk$meanForageLong) # pos, P-7
+
+t.test(meanForageLat ~ Campaign, tripStats) # inc higher, P-8
+t.test(meanForageLong ~ Campaign, tripStats) # rear higher, P-3
+
+t.test(meanForageLat ~ Campaign, tripStatscp) # insignificant
+t.test(meanForageLong ~ Campaign, tripStatscp) # insignificant
+
+t.test(meanForageLat ~ Campaign, tripStatssk) # inc higher, P-3
+t.test(meanForageLong ~ Campaign, tripStatssk) # rear higher, P-3
+
+# BY SEX
+
+t.test(meanForageLat ~ Sex, tripBurrowedSO) # No effect of sex on latitude
+t.test(meanForageLong ~ Sex, tripBurrowedSO)
+
+# Both of above
+
+summary(aov(meanForageLat ~ Sex * Campaign, tripBurrowedSO)) # Significant, P-3
+summary(aov(meanForageLong ~ Sex * Campaign, tripBurrowedSO)) # insignificant
+
+# BY HATCH DATE
+
+cor.test(tripBurrowedHO$meanForageLat, tripBurrowedHO$yday) # insignificant
+cor.test(tripBurrowedHO$meanForageLong, tripBurrowedHO$yday) # pos, P-2 (insignificant)
+head(tripBurrowedHO)
+
+
+## FINAL partial correlation attempt
+
+library(fastDummies)
+
+tripStats$dummyStatus = dummy_cols(tripStats, select_columns=c("Campaign"))
+
+?dummy_cols
+
+head(dummy_cols(tripStats, select_columns=c("Campaign"), remove_first_dummy=TRUE))
+dummy_cols(tripStats, select_columns=c("Campaign"), remove_first_dummy=TRUE)
+
+library(ppcor)
+
+head(tripStats)
+
+tripStatsskPCor = dummy_cols(tripStatssk, select_columns=c("Campaign"), remove_first_dummy=TRUE)
+tripStatscpPCor = dummy_cols(tripStatscp, select_columns=c("Campaign"), remove_first_dummy=TRUE)
+
+tripStatsPCor = dummy_cols(tripStatsPCor, select_columns=c("Campaign"), remove_first_dummy=TRUE)
+
+head(tripStatsPCor)
+tripStatsskPCorNoPeriod$logPeriod=NULL
+
+tripStatsskPCorNoPeriod = tripStatsskPCor
+tripStatscpPCorNoPeriod = tripStatscpPCor
+
+
+dummy_cols(tripBurrowedSO, select_columns=c("Sex"), remove_first_dummy=TRUE)
+
+tripBurrowedSOPCor$Sex = dummy_cols(tripBurrowedSO, select_columns=c("Sex"), remove_first_dummy=TRUE)$Sex_M
+dummy_cols(tripBurrowedSO, select_columns=c("Sex"), remove_first_dummy=TRUE)$Sex
+
+head(tripBurrowedSOPCor)
+
+pcor(tripStatsskPCorNoStart)
+
+# ONLY ON COPELAND is there significant interaction between campaign and distance. 
+
+pcor(tripStatsskPCorNoDist)
+
+# Apparently logPeriod is just not correlated with anything, gonna pretend I didn't see that.
+
+pcor(tripBurrowedSOPCor)
+
+pcor(tripStatscpPCorNoPeriod)
+
+cor.test(tripStatscp$logDistIsland, tripStatscp$tripStart)
+cor.test(tripStatscp$logPeriod, tripStatscp$tripStart)
+cor.test(tripStatssk$logDistIsland, tripStatssk$tripStart)
+cor.test(tripStatssk$logPeriod, tripStatssk$tripStart)
+
+unique(manx$Ring)
+nrow(tripBurrowedSO)

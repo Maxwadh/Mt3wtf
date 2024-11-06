@@ -1,0 +1,178 @@
+---
+title: "Wk1 MT R fun.rmd"
+output: html_document
+date: "2024-10-16"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+library(tidyverse)
+library(janitor)
+library(here)
+library(palmerpenguins)
+
+here::here() 
+# ^gives path directory
+
+head(penguins_raw)
+
+## DON'T CHANGE ANYTHING IN EXCEL!! Change using R
+
+# here makes the file path reproducible
+# tidyverse makes modifying the data reproducible # %>% = then
+# janitor deals with column names
+
+clean_names(penguins_raw) 
+
+head(penguins_raw)
+colnames(penguins_raw)
+
+penguins_raw = read.csv(here("dataPingu","penguins_raw.csv"))
+
+here()
+
+write.csv(penguins_raw, here("dataPingu","penguins_raw.csv"))
+# use here function so you don't write own working directory
+
+penguins_clean = penguins_raw %>%
+  select(-Comments) %>%
+  select(-starts_with("Delta")) %>%
+  clean_names()
+
+colnames(penguins_clean)
+
+write.csv(penguins_clean, here("dataPingu","penguins.clean.csv"))
+
+# ^ select from tidyverse
+colnames(penguins_nocomments)
+
+
+dir.create(here("functionspingu"))
+
+file.create(here("functionspingu", "cleaning.R"))
+
+penguins_raw = read.csv(here("dataPingu","penguins_raw.csv"))
+
+cleanColumns = function(raw_data){
+  raw_data %>%
+    select(-Comments) %>%
+    select(-starts_with("Delta")) %>%
+    clean_names()
+}
+
+penguins_cleanfunc = cleanColumns(penguins_raw)
+
+colnames(penguins_cleanfunc)
+
+
+# SOURCE function takes functions in our files (similar to loading library)
+
+source(here("functionspingu","cleaning.R"))
+
+penguinsnoNA = remove_NA(penguins_cleanfunc)
+head(penguinsnoNA)
+
+# INSTALLING PACKAGES
+
+
+install.packages("renv")
+
+renv::init()
+
+install.packages("table1")
+
+renv::snapshot()
+
+renv::restore()
+
+renv::status()
+
+renv::diagnostics()
+
+.libPaths()
+getOption("repos")
+
+
+___________________________________
+WK4
+___________________________________
+
+
+library(ggplot2)
+
+source(here("functionspingu", "cleaning canvas.R"))
+
+penguins_clean = read_csv(here("dataPingu","penguins.clean.csv"))
+
+head(penguins_clean)
+
+#### :(      )
+
+penguins_flipperspecies = drop_na(select(penguins_clean, c("species","flipper_length_mm")))
+
+penguins_flipperspecies = penguins_clean %>% 
+    select(species,flipper_length_mm) %>% 
+    drop_na()
+
+summary(penguins_flipperspecies)
+
+penguins_flipperspeshort = penguins_flipperspecies %>%
+    shorten_species()
+
+species_colours <- c("Adelie" = "darkorange",
+    "Chinstrap" = "purple",
+    "Gentoo" = "cyan4")
+
+flipperplotting = ggplot(aes(x=species,y=flipper_length_mm), data = penguins_flipperspeshort) + 
+    geom_boxplot(show.legend = FALSE, lwd=1.2, width = 0.5) + 
+    geom_jitter(show.legend = FALSE, alpha = 0.5, 
+        position = position_jitter(width = 0.3, seed = 69)) +
+    scale_color_manual(values = species_colours) +
+    labs(x="Species",y="Flipper Length (mm)")
+    
+flipperplotting
+
+plot_boxplot = function(data, xcolumn, ycolumn, x_label, y_label, colour_mapping){
+<fill function> ###
+}
+
+plot_boxplot(penguins_clean, species, flipper_length_mm, klokokloolplkollkopoololkopkoll)
+
+library(ragg)
+library(svglite)
+
+plkollkoloklolkoklkklpooppokokopl
+
+agg_png("figures/penguin_boxplot_default.png",
+width = 20, height = 20, units = "cm", res = 300)
+print(flipperplotting)
+
+## Save images as svg or pdf instead of png ; vector formats.
+
+git config --global user.email"max.sharman@wadham.ox.ac.uk"
+git config --global user.name"Maxwadh"
+
+
+

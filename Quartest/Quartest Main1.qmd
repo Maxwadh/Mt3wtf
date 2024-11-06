@@ -1,0 +1,88 @@
+---
+title: "Mt3 Wk2 Quartest"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r nice}
+1 + 1
+```
+
+You can add options to executable code like this
+
+```{r nicer}
+#| echo: false
+#| output: true
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
+
+## Excercise
+
+```{r}
+#| label: packagess
+library(ggplot2)
+library(Sleuth3)
+```
+
+```{r}
+#| label: ???
+head(case1402, 3)
+str(case1402)
+```
+
+
+```{r}
+case1402$log_William <- log(case1402$William)
+head(case1402, 3)
+```
+
+```{r}
+xlabel <- expression(paste("Ozone (μL L"^"-1",")"))
+ylabel <- expression(paste("Log Yield (kg ha"^"-1",")"))
+
+ggplot(case1402) + 
+  geom_point(aes(x=O3, y=log_William)) + 
+  facet_wrap(~ Stress) + 
+  labs(x = xlabel, y = ylabel) + 
+  theme_bw() + 
+  xlim(0,0.1)
+```
+#### legends fuck yeah
+
+```{r}
+stressRegression <- lm(case1402$log_William ~ case1402$Stress)
+anova(stressRegression)
+```
+#### insignificant
+
+```{r}
+O3Regression = lm(case1402$log_William ~ case1402$O3)
+anova(O3Regression)
+```
+#### significant
+
+```{r with interaction}
+fullBeanRegression = lm(log_William ~ Stress * O3, data = case1402)
+fullBeanRegressionNoInt = lm(log_William ~ Stress + O3, data = case1402)
+anova(fullBeanRegression)
+anova(fullBeanRegressionNoInt)
+```
+#### both significant but no interaction factor
+
+```{r}
+summary(fullBeanRegression)
+```
+
+```{r}
+confint(fullBeanRegression)
+```
